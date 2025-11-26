@@ -1,0 +1,14 @@
+[project]
+name = "pokecards"
+version = "0.1.0"
+description = "Pokemon card price scraper for pricecharting.com"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "pandas>=2.2.0",
+    "lxml>=5.0.0",
+    "pyyaml>=6.0.0",
+    "urllib3>=2.0.0",
+]
