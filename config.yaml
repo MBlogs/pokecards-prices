@@ -1,23 +1,27 @@
+output:
+  default_folder: "cards"
+  default_output_file: "output/card_prices.csv"
+
 scraping:
-  user_agents:
-    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36"
-    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  
-  timeout: 15
-  max_retries: 3
-  retry_delay: 2.0
+  # Incremental scraping - skip cards with recent valid prices
+  incremental:
+    enabled: true
+    max_age_days: 7  # Only re-scrape if last successful scrape was more than this many days ago
   
   # Debug settings
   debug_mode: false
   save_failed_html: true
-  
+  debug_output_folder: "debug"  # Folder for saving failed HTML files
+
+  timeout: 15
+  max_retries: 3
+  retry_delay: 2.0
+
   rate_limit:
     delay_min: 1.0
     delay_max: 3.0
     use_random: true
-  
+
   headers:
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     Accept-Language: "en-US,en;q=0.5"
@@ -26,6 +30,8 @@ scraping:
     Connection: "keep-alive"
     Upgrade-Insecure-Requests: "1"
 
-output:
-  default_folder: "cards"
-  default_output_file: "output/card_prices.csv"
+  user_agents:
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

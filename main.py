@@ -1,5 +1,5 @@
 import argparse
-from scraperconfig import Scraper
+from scraper import Scraper
 
 
 if __name__ == "__main__":
@@ -14,8 +14,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '-o', '--output',
-        default='card_prices.csv',
-        help='Output CSV file (default: card_prices.csv)'
+        default=None,
+        help='Output CSV file (default: from config.yaml)'
     )
     parser.add_argument(
         '-c', '--config',
@@ -28,5 +28,8 @@ if __name__ == "__main__":
     # Initialize scraper with config file
     scraper = Scraper(args.config)
     
+    # Use output from args, or fall back to config default
+    output_file = args.output if args.output else scraper.default_output_file
+    
     # Process the input
-    scraper.process_cards_input(args.input_path, args.output)
+    scraper.process_cards_input(args.input_path, output_file)

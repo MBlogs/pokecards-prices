@@ -3,6 +3,7 @@ import time
 import sys
 import yaml
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 from urllib.parse import quote
@@ -51,6 +52,16 @@ class Scraper:
         # Debug settings
         self.debug_mode = scraping.get('debug_mode', False)
         self.save_failed_html = scraping.get('save_failed_html', False)
+        self.debug_output_folder = scraping.get('debug_output_folder', 'debug')
+        
+        # Create debug output folder if it doesn't exist
+        if self.save_failed_html:
+            Path(self.debug_output_folder).mkdir(parents=True, exist_ok=True)
+        
+        # Incremental scraping settings
+        incremental = scraping.get('incremental', {})
+        self.incremental_enabled = incremental.get('enabled', False)
+        self.max_age_days = incremental.get('max_age_days', 7)
         
         # Create session with retry logic
         self.session = self._create_session()
@@ -97,6 +108,57 @@ class Scraper:
         card_name_encoded = quote(card_name_formatted, safe='-')
         return f"https://www.pricecharting.com/game/{set_name}/{card_name_encoded}-{card_number}"
     
+    def load_existing_data(self, output_file: str) -> Dict[tuple, Dict]:
+        """Load existing scraped data to check for recent prices.
+        
+        Returns:
+            Dictionary mapping (set, card_name, card_number) to existing row data
+        """
+        existing_data = {}
+        try:
+            if Path(output_file).exists():
+                df = pd.read_csv(output_file, dtype={'card_number': str})
+                for _, row in df.iterrows():
+                    key = (str(row.get('set', '')), str(row.get('card_name', '')), str(row.get('card_number', '')))
+                    existing_data[key] = row.to_dict()
+        except Exception as e:
+            print(f"Warning: Could not load existing data from {output_file}: {e}")
+        return existing_data
+    
+    def should_scrape(self, set_name: str, card_name: str, card_number: str, existing_data: Dict) -> tuple[bool, str]:
+        """Check if a card should be scraped based on incremental settings.
+        
+        Returns:
+            Tuple of (should_scrape: bool, reason: str)
+        """
+        if not self.incremental_enabled:
+            return True, "incremental mode disabled"
+        
+        key = (set_name, card_name, card_number)
+        if key not in existing_data:
+            return True, "no existing data"
+        
+        existing_row = existing_data[key]
+        
+        # Check if previous scrape had an error/no price
+        if existing_row.get('status') == 'failed' or pd.isna(existing_row.get('ungraded')):
+            return True, "previous scrape failed or no price"
+        
+        # Check if scraped_at timestamp exists and is recent enough
+        scraped_at = existing_row.get('scraped_at')
+        if pd.isna(scraped_at) or not scraped_at:
+            return True, "no timestamp"
+        
+        try:
+            scraped_time = datetime.fromisoformat(str(scraped_at))
+            age_days = (datetime.now() - scraped_time).total_seconds() / 86400
+            if age_days > self.max_age_days:
+                return True, f"data is {age_days:.1f} days old (max: {self.max_age_days})"
+            else:
+                return False, f"data is {age_days:.1f} days old (fresh)"
+        except (ValueError, TypeError) as e:
+            return True, f"invalid timestamp: {e}"
+    
     def scrape_price(self, url: str, attempt: int = 1) -> Dict[str, str]:
         """
         Scrape price information from a pricecharting.com URL.
@@ -136,7 +198,8 @@ class Scraper:
                 if not price_table:
                     # Save HTML for debugging if enabled
                     if self.save_failed_html:
-                        debug_file = f"debug_failed_{url.split('/')[-1]}.html"
+                        debug_filename = f"debug_failed_{url.split('/')[-1]}.html"
+                        debug_file = Path(self.debug_output_folder) / debug_filename
                         try:
                             with open(debug_file, 'w', encoding='utf-8', errors='replace') as f:
                                 # Ensure we're writing decoded text
@@ -271,20 +334,22 @@ class Scraper:
                 'error_detail': f'Unexpected error: {str(e)}'
             }
     
-    def process_single_set(self, csv_file: Path, set_name: str) -> List[Dict]:
+    def process_single_set(self, csv_file: Path, set_name: str, batch_start_time: str, existing_data: Dict) -> tuple[List[Dict], int, int]:
         """
         Process a single CSV file for one Pokemon card set.
         
         Args:
             csv_file: Path to the CSV file
             set_name: Name of the set (derived from filename)
-            session: Requests session with retry logic
-            config: Scraper configuration
+            batch_start_time: ISO format timestamp when the batch scraping started
+            existing_data: Dictionary of existing scraped data for incremental updates
             
         Returns:
-            List of result dictionaries
+            Tuple of (results, scraped_count, skipped_count)
         """
         results = []
+        scraped_count = 0
+        skipped_count = 0
         
         print(f"\n{'='*60}")
         print(f"Processing set: {set_name}")
@@ -299,8 +364,9 @@ class Scraper:
             print(f"Error reading file {csv_file}: {e}", file=sys.stderr)
             return results
         
-        # Filter out invalid rows
-        cards = [c for c in cards if c.get('card_name', '').strip() and c.get('card_number', '').strip()]
+        # Filter out invalid rows - handle None values gracefully
+        cards = [c for c in cards if c.get('card_name', '') and str(c.get('card_name', '')).strip() and 
+                 c.get('card_number', '') and str(c.get('card_number', '')).strip()]
         
         total_cards = len(cards)
         print(f"Found {total_cards} cards to process\n")
@@ -312,9 +378,27 @@ class Scraper:
             if not card_name or not card_number:
                 continue
             
+            # Check if we should scrape this card
+            should_scrape, reason = self.should_scrape(set_name, card_name, card_number, existing_data)
+            
             url = self.build_url(set_name, card_name, card_number)
-            print(f"[{idx}/{total_cards}] Scraping: {card_name} #{card_number}")
+            print(f"[{idx}/{total_cards}] {card_name} #{card_number}")
+            
+            if not should_scrape:
+                # Use existing data instead of scraping
+                print(f"  ⏭  Skipping: {reason}")
+                key = (set_name, card_name, card_number)
+                if key in existing_data:
+                    results.append(existing_data[key])
+                skipped_count += 1
+                print()
+                continue
+            
+            print(f"  🔍 Scraping: {reason}")
             print(f"  URL: {url}")
+            
+            # Record timestamp before scraping this individual card
+            scrape_time = datetime.now().isoformat()
             
             prices = self.scrape_price(url)
             
@@ -323,9 +407,12 @@ class Scraper:
                 'card_name': card_name,
                 'card_number': card_number,
                 'url': url,
+                'batch_start_time': batch_start_time,
+                'scraped_at': scrape_time,
             }
             
             # Check if we got an error or actual prices
+            scraped_count += 1
             if 'error' in prices:
                 result['status'] = 'failed'
                 result['error_type'] = prices['error']
@@ -345,7 +432,7 @@ class Scraper:
             
             print()
         
-        return results
+        return results, scraped_count, skipped_count
     
     
     def process_cards_input(self, input_path: str = 'cards', output_file: str = 'card_prices.csv'):
@@ -385,22 +472,109 @@ class Scraper:
                 print(f"  - {csv_file.stem}")
         
         all_results = []
+        total_scraped = 0
+        total_skipped = 0
+        total_successful = 0
+        total_failed = 0
+        
+        # Record the batch start time once for all sets in this run
+        batch_start_time = datetime.now().isoformat()
+        
+        # Load existing data for incremental scraping
+        existing_data = self.load_existing_data(output_file) if self.incremental_enabled else {}
         
         for csv_file in csv_files:
             # Use filename (without extension) as set name
             set_name = csv_file.stem
             
-            results = self.process_single_set(csv_file, set_name)
+            results, scraped_count, skipped_count = self.process_single_set(csv_file, set_name, batch_start_time, existing_data)
             all_results.extend(results)
+            total_scraped += scraped_count
+            total_skipped += skipped_count
+            
+            # Count successful vs failed for newly scraped cards only
+            for result in results[-scraped_count:] if scraped_count > 0 else []:
+                if result.get('status') == 'failed':
+                    total_failed += 1
+                else:
+                    total_successful += 1
         
-        # Save all results to CSV
-        if all_results:
-            df = pd.DataFrame(all_results)
-            df.to_csv(output_file, index=False)
-            print(f"\n{'='*60}")
-            print(f"Results saved to {output_file}")
-            successful = len([r for r in all_results if 'status' not in r or r['status'] != 'failed'])
-            print(f"Successfully processed {successful}/{len(all_results)} cards total")
-            print(f"{'='*60}")
+        # Merge results with existing data and save
+        if all_results or existing_data:
+            new_df = pd.DataFrame(all_results) if all_results else pd.DataFrame()
+            
+            # Load existing file if it exists
+            if Path(output_file).exists():
+                existing_df = pd.read_csv(output_file, dtype={'card_number': str})
+                
+                # Create a key for merging: (set, card_name, card_number)
+                if not existing_df.empty:
+                    existing_df['_key'] = existing_df.apply(
+                        lambda row: f"{row['set']}|{row['card_name']}|{row['card_number']}", axis=1
+                    )
+                
+                if not new_df.empty:
+                    new_df['_key'] = new_df.apply(
+                        lambda row: f"{row['set']}|{row['card_name']}|{row['card_number']}", axis=1
+                    )
+                    
+                    # Remove old entries for cards that were re-scraped
+                    existing_df = existing_df[~existing_df['_key'].isin(new_df['_key'])]
+                    
+                    # Combine existing and new data
+                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                else:
+                    # No new results, keep existing data
+                    combined_df = existing_df
+                
+                # Drop the temporary key column
+                if '_key' in combined_df.columns:
+                    combined_df = combined_df.drop('_key', axis=1)
+            else:
+                # No existing file, just use new data
+                combined_df = new_df
+            
+            if not combined_df.empty:
+                # Define desired column order: metadata, timestamps, price columns, error fields, then url
+                base_columns = ['set', 'card_name', 'card_number']
+                timestamp_columns = ['batch_start_time', 'scraped_at']
+                price_columns = ['ungraded', 'grade_7', 'grade_8', 'grade_9', 'grade_95', 'psa_10']
+                error_columns = ['status', 'error_type', 'error_message']
+                url_column = ['url']
+                
+                # Build the final column list with only columns that exist in the dataframe
+                final_columns = []
+                for col in base_columns + timestamp_columns + price_columns + error_columns + url_column:
+                    if col in combined_df.columns:
+                        final_columns.append(col)
+                
+                # Add any remaining columns that weren't in our predefined lists (for future-proofing)
+                for col in combined_df.columns:
+                    if col not in final_columns:
+                        final_columns.append(col)
+                
+                # Reorder and save
+                combined_df = combined_df[final_columns]
+                
+                # Create output directory if it doesn't exist
+                output_path = Path(output_file)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                combined_df.to_csv(output_file, index=False)
+                
+                print(f"\n{'='*60}")
+                print(f"Results saved to {output_file}")
+                if total_scraped > 0:
+                    print(f"Scraped: {total_scraped} cards ({total_successful} successful, {total_failed} failed)")
+                if total_skipped > 0:
+                    print(f"Skipped: {total_skipped} cards (fresh data)")
+                print(f"Total cards in file: {len(combined_df)}")
+                print(f"{'='*60}")
+            else:
+                print("\n{'='*60}")
+                print("No data to save")
+                print(f"{'='*60}")
         else:
+            print("\n{'='*60}")
             print("No results to save")
+            print(f"{'='*60}")
