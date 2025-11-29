@@ -76,7 +76,7 @@ python main.py --config custom_config.yaml
 
 # Combine options
 python main.py my_cards/ -o prices.csv -c config.yaml
-
+```
 
 **Note**: This project requires standard HTML/HTTP libraries. Do not install the `brotli` package unless you modify the config to request brotli encoding, as the default configuration uses only `gzip` and `deflate` compression.
 
@@ -144,7 +144,6 @@ tatsugiri,131
 - **Include variant suffixes** like `-reverse-holo` or `-holo` as part of the card_name when they are part of the card's official name
 - The card name in the CSV should match how it appears on pricecharting.com URLs
 - Example: Use `tatsugiri-reverse-holo` for reverse holo variant, `tatsugiri` for base card
-```
 
 ## Output
 
