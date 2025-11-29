@@ -18,8 +18,8 @@ scraping:
   retry_delay: 2.0
 
   rate_limit:
-    delay_min: 1.0
-    delay_max: 3.0
+    delay_min: 2.0
+    delay_max: 5.0
     use_random: true
 
   headers:
