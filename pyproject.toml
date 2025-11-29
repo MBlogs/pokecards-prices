@@ -1,5 +1,5 @@
 [project]
-name = "pokecards"
+name = "pokecards-prices"
 version = "0.1.0"
 description = "Pokemon card price scraper for pricecharting.com"
 readme = "README.md"
