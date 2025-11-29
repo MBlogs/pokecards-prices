@@ -48,6 +48,7 @@ class Scraper:
         # Output settings
         self.default_folder = output.get('default_folder', 'cards')
         self.default_output_file = output.get('default_output_file', 'card_prices.csv')
+        self.sort_by = output.get('sort_by', ['ungraded', 'set', 'card_name'])
         
         # Debug settings
         self.debug_mode = scraping.get('debug_mode', False)
@@ -553,8 +554,46 @@ class Scraper:
                     if col not in final_columns:
                         final_columns.append(col)
                 
-                # Reorder and save
+                # Reorder columns
                 combined_df = combined_df[final_columns]
+                
+                # Sort by configured columns
+                if self.sort_by:
+                    # Validate sort columns exist
+                    valid_sort_cols = []
+                    missing_cols = []
+                    for col in self.sort_by:
+                        if col in combined_df.columns:
+                            valid_sort_cols.append(col)
+                        else:
+                            missing_cols.append(col)
+                    
+                    if missing_cols:
+                        print(f"\n⚠ Warning: Sort columns not found in data: {', '.join(missing_cols)}")
+                        print(f"  Available columns: {', '.join(combined_df.columns.tolist())}")
+                    
+                    if valid_sort_cols:
+                        # Prepare sort columns with proper ascending/descending
+                        ascending_flags = []
+                        for col in valid_sort_cols:
+                            # Sort numeric price columns descending (highest first), others ascending
+                            if col in ['ungraded', 'grade_7', 'grade_8', 'grade_9', 'grade_95', 'psa_10']:
+                                # Convert price to numeric for sorting
+                                combined_df[f'_sort_{col}'] = combined_df[col].fillna('$0').astype(str).str.replace('$', '').str.replace(',', '')
+                                combined_df[f'_sort_{col}'] = pd.to_numeric(combined_df[f'_sort_{col}'], errors='coerce').fillna(0)
+                                ascending_flags.append(False)  # Descending for prices
+                            else:
+                                ascending_flags.append(True)  # Ascending for text
+                        
+                        # Replace original columns with sort columns where applicable
+                        sort_cols_to_use = [f'_sort_{col}' if f'_sort_{col}' in combined_df.columns else col for col in valid_sort_cols]
+                        
+                        combined_df = combined_df.sort_values(sort_cols_to_use, ascending=ascending_flags)
+                        
+                        # Drop temporary sort columns
+                        temp_cols = [col for col in combined_df.columns if col.startswith('_sort_')]
+                        if temp_cols:
+                            combined_df = combined_df.drop(temp_cols, axis=1)
                 
                 # Create output directory if it doesn't exist
                 output_path = Path(output_file)

@@ -1,6 +1,10 @@
 output:
   default_folder: "cards"
   default_output_file: "output/card_prices.csv"
+  sort_by:
+    - "ungraded"  # Primary sort: by ungraded price (descending for numeric, ascending for text)
+    - "set"        # Secondary sort: by set name
+    - "card_name"  # Tertiary sort: by card name
 
 scraping:
   # Incremental scraping - skip cards with recent valid prices
