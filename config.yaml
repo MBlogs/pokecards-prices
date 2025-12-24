@@ -10,7 +10,7 @@ scraping:
   # Incremental scraping - skip cards with recent valid prices
   incremental:
     enabled: true
-    max_age_days: 7  # Only re-scrape if last successful scrape was more than this many days ago
+    max_age_days: 30  # Only re-scrape if last successful scrape was more than this many days ago
   
   # Debug settings
   debug_mode: false
@@ -22,8 +22,8 @@ scraping:
   retry_delay: 2.0
 
   rate_limit:
-    delay_min: 2.0
-    delay_max: 5.0
+    delay_min: 3.0
+    delay_max: 8.0
     use_random: true
 
   headers:
