@@ -63,7 +63,8 @@ class Scraper:
         incremental = scraping.get('incremental', {})
         self.incremental_enabled = incremental.get('enabled', False)
         self.max_age_days = incremental.get('max_age_days', 7)
-        
+        self.min_price_threshold = incremental.get('min_price_threshold', 0)
+
         # Create session with retry logic
         self.session = self._create_session()
     
@@ -144,7 +145,17 @@ class Scraper:
         # Check if previous scrape had an error/no price
         if existing_row.get('status') == 'failed' or pd.isna(existing_row.get('ungraded')):
             return True, "previous scrape failed or no price"
-        
+
+        # Check if price is below the minimum threshold
+        if self.min_price_threshold > 0:
+            try:
+                price_str = str(existing_row.get('ungraded', '')).replace('$', '').replace(',', '')
+                price_val = float(price_str)
+                if price_val < self.min_price_threshold:
+                    return False, "price below threshold"
+            except (ValueError, TypeError):
+                pass
+
         # Check if scraped_at timestamp exists and is recent enough
         scraped_at = existing_row.get('scraped_at')
         if pd.isna(scraped_at) or not scraped_at:
@@ -366,6 +377,13 @@ class Scraper:
             return results
         
         # Filter out invalid rows - handle None values gracefully
+        # Also normalize quantity: if missing or empty, default to 1
+        for card in cards:
+            if 'quantity' not in card or not card.get('quantity', '').strip():
+                card['quantity'] = '1'
+            else:
+                card['quantity'] = card['quantity'].strip()
+        
         cards = [c for c in cards if c.get('card_name', '') and str(c.get('card_name', '')).strip() and 
                  c.get('card_number', '') and str(c.get('card_number', '')).strip()]
         
@@ -375,6 +393,7 @@ class Scraper:
         for idx, card in enumerate(cards, 1):
             card_name = card.get('card_name', '').strip()
             card_number = card.get('card_number', '').strip()
+            quantity = card.get('quantity', '1').strip()
             
             if not card_name or not card_number:
                 continue
@@ -407,6 +426,7 @@ class Scraper:
                 'set': set_name,
                 'card_name': card_name,
                 'card_number': card_number,
+                'quantity': quantity,
                 'url': url,
                 'batch_start_time': batch_start_time,
                 'scraped_at': scrape_time,
@@ -537,7 +557,7 @@ class Scraper:
             
             if not combined_df.empty:
                 # Define desired column order: metadata, timestamps, price columns, error fields, then url
-                base_columns = ['set', 'card_name', 'card_number']
+                base_columns = ['set', 'card_name', 'card_number', 'quantity']
                 timestamp_columns = ['batch_start_time', 'scraped_at']
                 price_columns = ['ungraded', 'grade_7', 'grade_8', 'grade_9', 'grade_95', 'psa_10']
                 error_columns = ['status', 'error_type', 'error_message']
