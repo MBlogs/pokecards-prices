@@ -390,69 +390,74 @@ class Scraper:
         total_cards = len(cards)
         print(f"Found {total_cards} cards to process\n")
         
-        for idx, card in enumerate(cards, 1):
-            card_name = card.get('card_name', '').strip()
-            card_number = card.get('card_number', '').strip()
-            quantity = card.get('quantity', '1').strip()
-            
-            if not card_name or not card_number:
-                continue
-            
-            # Check if we should scrape this card
-            should_scrape, reason = self.should_scrape(set_name, card_name, card_number, existing_data)
-            
-            url = self.build_url(set_name, card_name, card_number)
-            print(f"[{idx}/{total_cards}] {card_name} #{card_number}")
-            
-            if not should_scrape:
-                # Use existing data instead of scraping
-                print(f"  ⏭  Skipping: {reason}")
-                key = (set_name, card_name, card_number)
-                if key in existing_data:
-                    results.append(existing_data[key])
-                skipped_count += 1
+        try:
+            for idx, card in enumerate(cards, 1):
+                card_name = card.get('card_name', '').strip()
+                card_number = card.get('card_number', '').strip()
+                quantity = card.get('quantity', '1').strip()
+
+                if not card_name or not card_number:
+                    continue
+
+                # Check if we should scrape this card
+                should_scrape, reason = self.should_scrape(set_name, card_name, card_number, existing_data)
+
+                url = self.build_url(set_name, card_name, card_number)
+                print(f"[{idx}/{total_cards}] {card_name} #{card_number}")
+
+                if not should_scrape:
+                    # Use existing data instead of scraping
+                    print(f"  ⏭  Skipping: {reason}")
+                    key = (set_name, card_name, card_number)
+                    if key in existing_data:
+                        results.append(existing_data[key])
+                    skipped_count += 1
+                    print()
+                    continue
+
+                print(f"  🔍 Scraping: {reason}")
+                print(f"  URL: {url}")
+
+                # Record timestamp before scraping this individual card
+                scrape_time = datetime.now().isoformat()
+
+                prices = self.scrape_price(url)
+
+                result = {
+                    'set': set_name,
+                    'card_name': card_name,
+                    'card_number': card_number,
+                    'quantity': quantity,
+                    'url': url,
+                    'batch_start_time': batch_start_time,
+                    'scraped_at': scrape_time,
+                }
+
+                # Check if we got an error or actual prices
+                scraped_count += 1
+                if 'error' in prices:
+                    result['status'] = 'failed'
+                    result['error_type'] = prices['error']
+                    result['error_message'] = prices['error_detail']
+                    print(f"  ✗ {prices['error']}: {prices['error_detail']}")
+                else:
+                    result.update(prices)
+                    print(f"  ✓ Found {len(prices)} price(s): {', '.join(prices.keys())}")
+
+                results.append(result)
+
+                # Be respectful - add delay between requests with randomization
+                if idx < total_cards:
+                    delay = self.get_delay()
+                    print(f"  ⏱ Waiting {delay:.2f}s before next request...")
+                    time.sleep(delay)
+
                 print()
-                continue
-            
-            print(f"  🔍 Scraping: {reason}")
-            print(f"  URL: {url}")
-            
-            # Record timestamp before scraping this individual card
-            scrape_time = datetime.now().isoformat()
-            
-            prices = self.scrape_price(url)
-            
-            result = {
-                'set': set_name,
-                'card_name': card_name,
-                'card_number': card_number,
-                'quantity': quantity,
-                'url': url,
-                'batch_start_time': batch_start_time,
-                'scraped_at': scrape_time,
-            }
-            
-            # Check if we got an error or actual prices
-            scraped_count += 1
-            if 'error' in prices:
-                result['status'] = 'failed'
-                result['error_type'] = prices['error']
-                result['error_message'] = prices['error_detail']
-                print(f"  ✗ {prices['error']}: {prices['error_detail']}")
-            else:
-                result.update(prices)
-                print(f"  ✓ Found {len(prices)} price(s): {', '.join(prices.keys())}")
-            
-            results.append(result)
-            
-            # Be respectful - add delay between requests with randomization
-            if idx < total_cards:
-                delay = self.get_delay()
-                print(f"  ⏱ Waiting {delay:.2f}s before next request...")
-                time.sleep(delay)
-            
-            print()
-        
+        except KeyboardInterrupt:
+            print(f"\n  Interrupted — saving {len(results)} result(s) collected so far...")
+        except Exception as e:
+            print(f"\n  Error during scraping: {e} — saving {len(results)} result(s) collected so far...")
+
         return results, scraped_count, skipped_count
     
     
@@ -504,22 +509,27 @@ class Scraper:
         # Load existing data for incremental scraping
         existing_data = self.load_existing_data(output_file) if self.incremental_enabled else {}
         
-        for csv_file in csv_files:
-            # Use filename (without extension) as set name
-            set_name = csv_file.stem
-            
-            results, scraped_count, skipped_count = self.process_single_set(csv_file, set_name, batch_start_time, existing_data)
-            all_results.extend(results)
-            total_scraped += scraped_count
-            total_skipped += skipped_count
-            
-            # Count successful vs failed for newly scraped cards only
-            for result in results[-scraped_count:] if scraped_count > 0 else []:
-                if result.get('status') == 'failed':
-                    total_failed += 1
-                else:
-                    total_successful += 1
-        
+        try:
+            for csv_file in csv_files:
+                # Use filename (without extension) as set name
+                set_name = csv_file.stem
+
+                results, scraped_count, skipped_count = self.process_single_set(csv_file, set_name, batch_start_time, existing_data)
+                all_results.extend(results)
+                total_scraped += scraped_count
+                total_skipped += skipped_count
+
+                # Count successful vs failed for newly scraped cards only
+                for result in results[-scraped_count:] if scraped_count > 0 else []:
+                    if result.get('status') == 'failed':
+                        total_failed += 1
+                    else:
+                        total_successful += 1
+        except KeyboardInterrupt:
+            print(f"\nInterrupted — saving {len(all_results)} result(s) collected so far...")
+        except Exception as e:
+            print(f"\nError: {e} — saving {len(all_results)} result(s) collected so far...")
+
         # Merge results with existing data and save
         if all_results or existing_data:
             new_df = pd.DataFrame(all_results) if all_results else pd.DataFrame()
