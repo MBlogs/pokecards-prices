@@ -11,7 +11,7 @@ scraping:
   incremental:
     enabled: true
     max_age_days: 30  # Only re-scrape if last successful scrape was more than this many days ago
-    min_price_threshold: 0.50  # Skip cards with previous price below this amount
+    min_price_threshold: 1.00  # Skip cards with previous price below this amount
   
   # Debug settings
   debug_mode: false
